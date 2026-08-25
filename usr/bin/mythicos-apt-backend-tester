@@ -1,0 +1,282 @@
+#!/usr/bin/python3
+
+import gi
+import apt
+gi.require_version("Gtk", "3.0")
+gi.require_version("XApp", "1.0")
+
+from gi.repository import Gtk, Gio, XApp
+
+#pkit
+gi.require_version("PackageKitGlib", "1.0")
+from gi.repository import PackageKitGlib
+
+#aptd
+import aptdaemon.client
+import aptdaemon.gtk3widgets
+
+#aptk
+import aptkit.client
+import aptkit.gtk3widgets
+
+class App():
+    def __init__(self):
+        self.builder = Gtk.Builder()
+        self.builder.add_from_file("/usr/share/mythicos-dev-tools/mythicos-apt-backend-tester.ui")
+        self.window = self.builder.get_object("main_window")
+        self.window.connect("delete-event", Gtk.main_quit)
+        self.progress = self.builder.get_object("progress")
+        self.window.show()
+        self.cache = apt.Cache()
+
+        self.pkit_cancellable = None
+        self.builder.get_object("pkit_update").connect("clicked", self.pkit_update)
+        self.builder.get_object("pkit_install").connect("clicked", self.pkit_install)
+        self.builder.get_object("pkit_remove").connect("clicked", self.pkit_remove)
+        self.builder.get_object("pkit_purge").connect("clicked", self.pkit_purge)
+        self.builder.get_object("pkit_cancel").connect("clicked", self.pkit_cancel)
+
+        self.aptd_client = aptdaemon.client.AptClient()
+        self.builder.get_object("aptd_update").connect("clicked", self.aptd_update)
+        self.builder.get_object("aptd_install").connect("clicked", self.aptd_install)
+        self.builder.get_object("aptd_remove").connect("clicked", self.aptd_remove)
+        self.builder.get_object("aptd_cancel").connect("clicked", self.aptd_cancel)
+
+        self.aptk_client = aptkit.client.AptClient()
+        self.builder.get_object("aptk_update").connect("clicked", self.aptk_update)
+        self.builder.get_object("aptk_install").connect("clicked", self.aptk_install)
+        self.builder.get_object("aptk_remove").connect("clicked", self.aptk_remove)
+
+    def get_packages(self):
+        pkgs = []
+        for name in self.builder.get_object("entry").get_text().split(" "):
+            if name in self.cache:
+                pkgs.append(self.cache[name])
+        return pkgs
+
+    def get_package_names(self):
+        names = []
+        for pkg in self.get_packages():
+            names.append(pkg.name)
+        return names
+
+    def finished(self):
+        XApp.set_window_progress(self.window, 0)
+        self.progress.set_fraction(0.0)
+        self.progress.set_text("Finished")
+
+    ##################################################################################
+    ## PACKAGE KIT
+    ##################################################################################
+
+    def get_pkit_ids(self):
+        """ pkit works with IDs, not just pkg names """
+        pkg_ids = []
+        for pkg in self.get_packages():
+            pkg_id = f"{pkg.shortname};{pkg.candidate.version};{pkg.candidate.architecture};"
+            pkg_ids.append(pkg_id)
+        return pkg_ids
+
+    def pkit_update(self, button):
+        print("Pkit update")
+        task = PackageKitGlib.Task()
+        self.pkit_cancellable = Gio.Cancellable()
+        task.refresh_cache_async(True, self.pkit_cancellable, self.on_pkit_progress, (None, ), self.on_pkit_finished, (None, ))
+
+    def on_pkit_progress(self, progress, ptype, data=None):
+        if progress.get_status() == PackageKitGlib.StatusEnum.DOWNLOAD:
+            self.progress.set_text("Downloading...")
+        elif progress.get_status() == PackageKitGlib.StatusEnum.INSTALL:
+            self.progress.set_text("Installing...")
+        elif progress.get_status() == PackageKitGlib.StatusEnum.REMOVE:
+            self.progress.set_text("Removing...")
+        elif progress.get_status() == PackageKitGlib.StatusEnum.CANCEL:
+            self.progress.set_text("Cancelling...")
+        elif progress.get_status() == PackageKitGlib.StatusEnum.LOADING_CACHE:
+            self.progress.set_text("Loading cache...")
+        else:
+            self.progress.set_text("")
+        if ptype == PackageKitGlib.ProgressType.PERCENTAGE:
+            prog_value = progress.get_property('percentage')
+            self.progress.set_fraction(prog_value / 100.0)
+            XApp.set_window_progress(self.window, prog_value)
+
+    def on_pkit_finished(self, source, result, data=None):
+        self.finished()
+        print("Pkit update finished")
+        try:
+            results = source.generic_finish(result)
+        except Exception as e:
+            error = e.message
+            self.progress.set_text(f"Error: {error}")
+            print("Pkit update error:", e.message)
+
+    def pkit_install(self, button):
+        print("Pkit install")
+        self.pkit_cancellable = Gio.Cancellable()
+        task = PackageKitGlib.Task()
+        pkg_ids = self.get_pkit_ids()
+        if len(pkg_ids) > 0:
+            print(pkg_ids)
+            task.install_packages_async(pkg_ids,
+                            self.pkit_cancellable,  # cancellable
+                            self.on_pkit_progress,
+                            (None, ),  # progress data
+                            self.on_pkit_finished,  # callback ready
+                            None  # callback data
+                            )
+
+    def pkit_remove(self, button):
+        print("Pkit remove")
+        self.pkit_cancellable = Gio.Cancellable()
+        task = PackageKitGlib.Task()
+        pkg_ids = self.get_pkit_ids()
+        if len(pkg_ids) > 0:
+            print(pkg_ids)
+            task.remove_packages_async(pkg_ids,
+                            False,  # allow deps
+                            True,  # autoremove
+                            self.pkit_cancellable,  # cancellable
+                            self.on_pkit_progress,
+                            (None, ),  # progress data
+                            self.on_pkit_finished,  # callback ready
+                            None  # callback data
+                            )
+
+    def pkit_purge(self, button):
+        print("Pkit purge")
+        self.pkit_cancellable = Gio.Cancellable()
+        task = PackageKitGlib.Task()
+        pkg_ids = self.get_pkit_ids()
+        if len(pkg_ids) > 0:
+            print(pkg_ids)
+            task.purge_packages_async(pkg_ids,
+                            False,  # allow deps
+                            True,  # autoremove
+                            self.pkit_cancellable,  # cancellable
+                            self.on_pkit_progress,
+                            (None, ),  # progress data
+                            self.on_pkit_finished,  # callback ready
+                            None  # callback data
+                            )
+
+    def pkit_cancel(self, button):
+        print("Pkit cancel")
+        if self.pkit_cancellable != None:
+            self.pkit_cancellable.cancel()
+
+
+    ##################################################################################
+    ## APTDAEMON
+    ##################################################################################
+    def aptd_install(self, button):
+        packages = self.get_package_names()
+        print(packages)
+        self.transaction = self.aptd_client.commit_packages(install=packages, remove=[],
+                                                               reinstall=[], purge=[], upgrade=[], downgrade=[])
+        self.transaction.set_allow_unauthenticated(True)
+        self.transaction.connect("progress-changed", self.on_aptd_progress)
+        self.transaction.connect("cancellable-changed", self.on_aptd_cancel)
+        self.transaction.connect("finished", self.on_aptd_finished)
+        self.transaction.connect("error", self.on_aptd_error)
+        self.transaction.run()
+
+    def aptd_remove(self, button):
+        packages = self.get_package_names()
+        self.transaction = self.aptd_client.commit_packages(install=[], remove=packages,
+                                                               reinstall=[], purge=[], upgrade=[], downgrade=[])
+        self.transaction.set_allow_unauthenticated(True)
+        self.transaction.connect("progress-changed", self.on_aptd_progress)
+        self.transaction.connect("cancellable-changed", self.on_aptd_cancel)
+        self.transaction.connect("finished", self.on_aptd_finished)
+        self.transaction.connect("error", self.on_aptd_error)
+        self.transaction.run()
+
+    def aptd_update(self, button):
+        self.update_transaction = self.aptd_client.update_cache()
+        self.update_transaction.connect("finished", self.on_aptd_finished)
+        dia = aptdaemon.gtk3widgets.AptProgressDialog(self.update_transaction)
+        dia.set_transient_for(self.window)
+        dia.set_modal(True)
+        dia.run(close_on_finished=True, show_error=True,
+                reply_handler=lambda: True
+                )
+
+    def aptd_cancel(self, button):
+        self.transaction.cancel()
+
+    def on_aptd_progress(self, transaction, progress):
+        #print(progress)
+        self.progress.set_text("Applying changes...")
+        self.progress.set_fraction(progress / 100.0)
+        XApp.set_window_progress(self.window, progress)
+
+    def on_aptd_cancel(self, transaction, cancellable):
+        pass
+
+    def on_aptd_error(self, transaction, error_code, error_details):
+        print(error_details)
+        self.progress.set_text(f"Error: {error_details}")
+
+    def on_aptd_finished(self, transaction, exit_state):
+        self.finished()
+        print("APTd transaction finished")
+
+
+    ##################################################################################
+    ## APTKIT
+    ##################################################################################
+    def aptk_install(self, button):
+        packages = self.get_package_names()
+        deferred = self.aptk_client.commit_packages(install=packages,
+                                                    remove=[], reinstall=[], purge=[], upgrade=[], downgrade=[],
+                                                    reply_handler=self._aptk_simulate,
+                                                    error_handler=self.on_aptk_error)
+
+    def aptk_remove(self, button):
+        packages = self.get_package_names()
+        deferred = self.aptk_client.commit_packages(install=[], remove=packages,
+                                                    reinstall=[], purge=[], upgrade=[], downgrade=[],
+                                                    reply_handler=self._aptk_simulate,
+                                                    error_handler=self.on_aptk_error)
+
+    def aptk_update(self, button):
+        self.update_transaction = self.aptk_client.update_cache()
+        self.update_transaction.connect("finished", self.on_aptk_finished)
+        dia = aptkit.gtk3widgets.AptProgressDialog(self.update_transaction, parent=self.window)
+        dia.run(close_on_finished=True, show_error=True,
+                reply_handler=lambda: True)
+
+    def _aptk_simulate(self, transaction):
+        transaction.set_allow_unauthenticated(True)
+        transaction.connect("finished", self.on_aptk_finished)
+        transaction.simulate(reply_handler=lambda: self._aptk_confirm_deps(transaction),
+                             error_handler=self.on_aptk_error)
+
+    def _aptk_confirm_deps(self, transaction):
+        if [pkgs for pkgs in transaction.dependencies if pkgs]:
+            d = aptkit.gtk3widgets.AptConfirmDialog(transaction, parent=self.window)
+            res = d.run()
+            d.destroy()
+            if res != Gtk.ResponseType.OK:
+                return
+        self._aptk_run_transaction(transaction)
+
+    def _aptk_run_transaction(self, transaction):
+        dia = aptkit.gtk3widgets.AptProgressDialog(transaction, parent=self.window)
+        dia.run(close_on_finished=True, show_error=True,
+                reply_handler=lambda: True,
+                error_handler=self.on_aptk_error)
+
+    def on_aptk_error(self, transaction, error_code=None, error_details=None):
+        print(error_code, error_details)
+        self.progress.set_text(f"Error: {error_details}")
+
+    def on_aptk_cancel(self, transaction, cancellable):
+        print("APTk transaction cancelled")
+
+    def on_aptk_finished(self, transaction, exit_state):
+        print("APTk transaction finished")
+
+App()
+Gtk.main()

@@ -1,0 +1,7 @@
+#!/usr/bin/make -f
+
+%:
+	dh ${@}
+
+override_dh_usrlocal:
+	# don't forbid the use of /usr/local
