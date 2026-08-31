@@ -1,10 +1,13 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: mint-dev-tools
-Upstream-Contact: Clement Lefebvre <root@linuxmint.com>
-Source: https://github.com/linuxmint/mint-dev-tools
+Name: mythicos-dev-tools
+Upstream-Contact: Studio Hastag <contact@hastag.fr>
+Upstream-Source: https://github.com/linuxmint/mint-dev-tools
+Source: https://github.com/Studio-Hastag/mythicos-dev-tools
 
 Files: *
 Copyright: 2015 Clement Lefebvre <root@linuxmint.com>
+           2026 Studio Hastag <contact@hastag.fr>
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
