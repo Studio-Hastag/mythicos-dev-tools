@@ -3,9 +3,6 @@ mythicos-dev-tools (1.0.0) lucid; urgency=medium
   * Initial fork of Linux Mint's mint-dev-tools for MythicOS.
   * Renamed all mint-* binaries to mythicos-* (cinnamon-stats-tracker
     became cinnade-stats-tracker to match the Cinnade DE fork naming).
-  * mythicos-build now clones from the StudioHastag GitHub org by
-    default instead of linuxmint (edit GITHUB_ORG in the script if
-    your org name differs).
   * Moved shared data from /usr/share/mint-dev-tools to
     /usr/share/mythicos-dev-tools and fixed every internal path
     reference accordingly.
